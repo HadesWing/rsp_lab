@@ -1,0 +1,8 @@
+# 编译产物（build.sh 可再生）
+*.ko
+*.o
+*.dtbo
+*.cmd
+*.order
+*.symvers
+.tmp_versions/
