@@ -1,0 +1,24 @@
+// T2/T3 用：往根节点下挂一个虚拟平台设备，compatible = "hades,demo"
+//
+// 编译：dtc -@ -I dts -O dtb -o demo-overlay.dtbo demo-overlay.dts
+// 安装：sudo cp demo-overlay.dtbo /boot/firmware/overlays/
+//       echo "dtoverlay=demo-overlay" | sudo tee -a /boot/firmware/config.txt
+//       sudo reboot
+// 验证：ls /proc/device-tree/ | grep demo      ← 出现 demo 节点就说明 overlay 生效了
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "brcm,bcm2835";
+
+	fragment@0 {
+		target-path = "/";
+		__overlay__ {
+			bsp_demo: bsp_demo {
+				compatible = "hades,demo";
+				status = "okay";
+				label = "bsp-lab";
+			};
+		};
+	};
+};
