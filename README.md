@@ -30,6 +30,31 @@ ssh pi-lab 'sudo rmmod hello_mod; dmesg | tail -2'
 
 ✅ 判据：`dmesg` 里出现 `hello_mod: 加载成功，jiffies=...`，卸载后出现 `hello_mod: 卸载`。
 
+### T1 实测记录（Raspberry Pi 1 B+ / 6.18.59-R1 / ARMv6）
+
+模块产物：`vermagic=6.18.59-R1 mod_unload modversions ARMv6 p2v8`，cross-compiled，5012 字节。
+
+```
+$ sudo insmod /tmp/hello_mod.ko      # exit=0
+[75940.954235] hello_mod: loading out-of-tree module taints kernel.
+[75940.954235] hello_mod: 加载成功，jiffies=7564032
+
+$ lsmod | grep hello_mod
+hello_mod              12288  0        # 12KB 常驻内存，引用计数 0
+$ cat /sys/module/hello_mod/initstate
+live
+
+$ sudo rmmod hello_mod               # exit=0
+[75941.482517] hello_mod: 卸载
+$ ls /sys/module/hello_mod
+No such file or directory            # 内核态痕迹彻底清除
+```
+
+两条值得记的现象：
+
+- `jiffies/100 ≈ 系统 uptime 秒数`（7564032/100 = 75640s），证明模块确实在内核态读到了全局节拍计数器，而不是用户态打印。
+- `loading out-of-tree module taints kernel` 不是错误：树外模块会在内核 taint 标记上加位，用于日后 oops 归因——这正是 `M=` 外部模块的正常身份。
+
 ## T2 设备树：装 overlay
 
 ```bash
