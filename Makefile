@@ -4,6 +4,7 @@ CROSS_COMPILE ?= arm-linux-gnueabihf-
 
 obj-m += hello_mod/
 obj-m += demo_drv/
+obj-m += i2c_demo/
 
 all:
 	$(MAKE) -C $(KDIR) M=$(PWD) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) modules

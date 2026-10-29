@@ -1,4 +1,4 @@
-# bsp_lab —— 今天的三个 BSP 教程
+# bsp_lab —— 四个 BSP 教程（T1 模块 / T2 设备树 / T3 platform driver / T4 I2C）
 
 配套文档：《BSP能力盘点_已踩与未涉及_含今日教程》（本地工作区文档，不入库）
 
@@ -145,6 +145,61 @@ $ ls -d /proc/device-tree/bsp_demo              # 仍在——设备树节点不
 
 ❌ 如果 insmod 成功但没有 probe 日志 → compatible 没匹配上（大小写/拼写/overlay 没生效）
 ❌ 如果 insmod 报 `Invalid argument` 或 `version magic` → 模块不是用同一棵内核树编的
+
+## T4 I2C：用假芯片练真实的 I2C 驱动（不需要任何器件）
+
+器件还没到货也能练。内核自带 `i2c-stub`：它在软件里模拟一个 I2C 适配器 + 若干个 256 寄存器的假芯片，读写走真实的 SMBus 协议栈，只是最终数据落进内存而不是线上。
+
+**编出来不用改配置**：`i2c-stub.c` 没有任何 `CONFIG` 守卫、只用导出符号，所以 build.sh 用命令行覆盖变量单独编它：
+
+```bash
+make -C ~/linux M=~/linux/drivers/i2c CONFIG_I2C_STUB=m modules
+```
+
+这条命令本身就是个考点——**证明"某个驱动能不能编"取决于源码是否依赖 CONFIG 守卫，而不是它有没有进 .config**。
+
+### 步骤（不用重启）
+
+```bash
+sudo modprobe i2c-dev                                   # 生成 /dev/i2c-*
+sudo insmod /tmp/i2c-stub.ko chip_addr=0x50             # 假芯片上线
+sudo i2cdetect -l                                       # 看新适配器编号 N
+sudo i2cdetect -y N                                     # 0x50 位应显示 50
+```
+
+用户态验证寄存器读写（这一步走的是 `i2c-dev` 的 ioctl，不涉及我们的驱动）：
+
+```bash
+sudo i2cset -y N 0x50 0x00 0x5a
+sudo i2cget -y N 0x50 0x00        # → 0x5a
+```
+
+装驱动、实例化设备、读寄存器：
+
+```bash
+sudo insmod /tmp/demo_i2c.ko
+echo demo_i2c 0x50 | sudo tee /sys/bus/i2c/devices/i2c-N/new_device
+dmesg | tail -5                   # probe 被调用 + 寄存器初值 0x5a
+cat /dev/demo_i2c                 # → reg[0x00]=0x5a
+printf '\x77' | sudo tee /dev/demo_i2c
+cat /dev/demo_i2c                 # → reg[0x00]=0x77
+sudo rmmod demo_i2c               # remove：设备已注销
+```
+
+清理：`sudo rmmod i2c-stub`（适配器一起消失）。
+
+### 这一步的四个考点
+
+| 现象 | 考点 |
+|---|---|
+| `new_device` 一写就 probe | **I2C 设备有三种实例化方式**：设备树、`new_device` sysfs、板级 `i2c_board_info`。产品里用第一种，调试时第二种最方便 |
+| probe 里 `i2c_smbus_read_byte_data` 返回值必须判负 | `-ENXIO` = 地址上没器件应答，`-EREMOTEIO` = 应答但数据不全。**不判负是新手最常犯的错**，会让 probe 带着坏状态继续跑 |
+| `/dev/demo_i2c` 读写 | `copy_to_user/copy_from_user` 不能换成 `memcpy`（用户地址可能换页、可能非法） |
+| `rmmod` 之后 `new_device` 的 client 还在 | client 是总线的孩子，不归驱动所有——**和 T3 的设备树节点同一个道理** |
+
+### 换成真实器件要改什么
+
+只改三处：`DEMO_I2C_ADDR` 换成器件手册里的地址、寄存器号换成它的 ID 寄存器、以及用它的真实时序（有的芯片要先写指针再读，有的要连读多字节）。**骨架不变**——这就是为什么先用假芯片练是划算的：骨架通了，换器件只剩查手册。
 
 ## 撤销（把板子恢复原样）
 
