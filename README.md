@@ -201,6 +201,40 @@ sudo rmmod demo_i2c               # remove：设备已注销
 
 只改三处：`DEMO_I2C_ADDR` 换成器件手册里的地址、寄存器号换成它的 ID 寄存器、以及用它的真实时序（有的芯片要先写指针再读，有的要连读多字节）。**骨架不变**——这就是为什么先用假芯片练是划算的：骨架通了，换器件只剩查手册。
 
+## T5 用户态裸寄存器：/dev/mem 直读外设（不买 STM32 也能练寄存器操作）
+
+**目的**：证明"读写寄存器"与是否有 RTOS/裸机无关——mmap 物理地址后，操作语义与 STM32 的 `USART1->SR` 完全一致。
+
+板上原生编译（源码 60 行，1 秒编完，无需交叉编译）：
+
+```bash
+ssh pi-lab 'cat > /tmp/regpeek.c' < regpeek/regpeek.c
+ssh pi-lab 'gcc /tmp/regpeek.c -o /tmp/regpeek -Wall && sudo /tmp/regpeek'
+```
+
+### T5 实测记录（2026-11-03）
+
+```
+GPFSEL1 = 0x00024000
+  GPIO14 功能字段 = 4   (4 = ALT0 = TXD0)
+  GPIO15 功能字段 = 4   (4 = ALT0 = RXD0)
+UART0_FR = 0x00000091
+  TXFE=1 (TX FIFO 空)  RXFE=1 (RX FIFO 空)  BUSY=0
+```
+
+判读：
+- `0x24000` 的 bit14:12=100、bit17:15=100，**与 pinctrl-bcm2835.c 的 `FSEL_REG/FSEL_SHIFT` 公式推算完全一致**（14 号脚 = 基址+0x4 的 bit12..14）——设备树里 `brcm,function=<4>` 写进硬件后就是这个值
+- `FR=0x91` = CTS=1（对端允许发送）+ TXFE + RXFE：串口硬件的实时状态，用户态直接摸到了
+
+与 STM32 的等价关系：
+
+| 这里的代码 | STM32 等价物 |
+|---|---|
+| `gpio[GPFSEL1_IDX]` 读功能选择 | 读 `GPIOA->CRL` |
+| `uart[UART_FR_IDX]` 读标志寄存器 | 读 `USART1->SR`（等 TXE 位） |
+
+**注意**：本实验只读。写 GPFSEL 前必须想清楚——写错一个 bit 会把串口弄丢。
+
 ## 撤销（把板子恢复原样）
 
 ```bash
