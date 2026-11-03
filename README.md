@@ -1,4 +1,4 @@
-# bsp_lab —— 四个 BSP 教程（T1 模块 / T2 设备树 / T3 platform driver / T4 I2C）
+# bsp_lab —— 五个 BSP 教程（T1 模块 / T2 设备树 / T3 platform driver / T4 I2C / T5 裸寄存器）
 
 配套文档：《BSP能力盘点_已踩与未涉及_含今日教程》（本地工作区文档，不入库）
 
@@ -7,9 +7,13 @@ bsp_lab/
 ├── hello_mod/    T1  第一个内核模块（20 分钟，不用重启）
 ├── dts/          T2  设备树 overlay（30 分钟，需重启一次）
 ├── demo_drv/     T3  platform driver 匹配设备树（60 分钟，BSP 面试核心）
-├── build.sh      一键编译（模块 + overlay）
+├── i2c_demo/     T4  I2C 客户端驱动 + i2c-stub 假芯片（不用器件，不用重启）
+├── regpeek/      T5  用户态 /dev/mem 直读外设寄存器（不用重启，板上原生 gcc）
+├── build.sh      一键编译（4 个 .ko + 1 个 dtbo）
 └── push.sh       推到板子 /tmp
 ```
+
+**五个 demo 的共同点**：都不需要真实外设、都不改内核配置。它们分别验证 BSP 的一条主干能力，串起来就是「模块 → 设备描述 → 驱动匹配 → 总线客户端 → 寄存器」的完整链条。
 
 ## 0. 编译
 
