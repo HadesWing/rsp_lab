@@ -197,6 +197,66 @@ sudo rmmod demo_i2c               # remove：设备已注销
 | `/dev/demo_i2c` 读写 | `copy_to_user/copy_from_user` 不能换成 `memcpy`（用户地址可能换页、可能非法） |
 | `rmmod` 之后 `new_device` 的 client 还在 | client 是总线的孩子，不归驱动所有——**和 T3 的设备树节点同一个道理** |
 
+### T4 实测记录（2026-11-03）
+
+**第一个坑：`insmod` 不带参数直接失败**（第一次跑就是在这一步卡住的）：
+
+```
+i2c-stub: Please specify a chip address
+insmod: ERROR: could not insert module /tmp/i2c-stub.ko: No such device
+```
+
+根因在 `i2c_stub_init()` 开头：`if (!chip_addr[0]) { pr_err("Please specify a chip address"); return -ENODEV; }`
+——`chip_addr` 是 `module_param_array` 参数，没给值时 `chip_addr[0]` 为 0，模块 init 直接返回 `-ENODEV`，insmod 就报 "No such device"。**必须写成 `chip_addr=0x50`**（大小写不敏感，0x03–0x77 之间）。
+
+带参数后完整闭环（本机实测）：
+
+```
+$ sudo insmod /tmp/i2c-stub.ko chip_addr=0x50
+i2c-stub: Virtual chip at 0x50
+
+$ sudo i2cdetect -l
+i2c-11  smbus  SMBus stub driver  SMBus adapter      ← 编号不是固定 1，每次装可能变
+
+$ sudo i2cdetect -y 11
+50: 50 -- -- ...
+
+$ sudo i2cset -y 11 0x50 0x00 0x5a && sudo i2cget -y 11 0x50 0x00
+0x5a                                                  ← 用户态走 i2c-dev ioctl
+
+$ sudo insmod /tmp/demo_i2c.ko
+$ echo demo_i2c 0x50 | sudo tee /sys/bus/i2c/devices/i2c-11/new_device
+demo_i2c 11-0050: probe 被调用：地址 0x50，适配器 SMBus stub driver
+demo_i2c 11-0050: 寄存器 0x00 初值 = 0x5a
+demo_i2c 11-0050: 就绪：/dev/demo_i2c
+
+$ ls -l /dev/demo_i2c
+crw------- 1 root root 10, 263                          ← misc 设备：主 10，次号动态分配
+
+$ sudo cat /dev/demo_i2c
+reg[0x00]=0x5a
+$ sudo sh -c "printf 'w' > /dev/demo_i2c"               ← 写 0x77
+demo_i2c 11-0050: 写 reg[0x00] = 0x77
+$ sudo cat /dev/demo_i2c
+reg[0x00]=0x77
+
+$ sudo i2cdetect -y 11
+50: UU -- -- ...                                        ← UU 表示已被驱动占用（不再探测）
+```
+
+**反向实验（验证"返回值必须判负"是真的有用）**：往没有器件的 0x51 实例化——
+
+```
+demo_i2c 11-0051: probe 被调用：地址 0x51，适配器 SMBus stub driver
+demo_i2c 11-0051: 探测失败（器件无应答）: -19          ← -19 = -ENXIO
+```
+
+probe 返回负值 → 驱动**没有**绑定成功、`/dev/demo_i2c` 没被创建。如果不判负，这里会带着野指针继续 `misc_register`，用户态一读就是一堆 I/O error。
+
+**两个容易踩的细节**：
+- `printf '\x77' > /dev/demo_i2c` 在嵌套 ssh/引号里会被二次转义吃掉反斜杠（实测写进去变成 `0x5c`），改用字符 `w` 或 `echo -n` 更稳
+- 设备节点权限是 `crw-------`（root only），`sudo cat` 才读得到
+
 ### 换成真实器件要改什么
 
 只改三处：`DEMO_I2C_ADDR` 换成器件手册里的地址、寄存器号换成它的 ID 寄存器、以及用它的真实时序（有的芯片要先写指针再读，有的要连读多字节）。**骨架不变**——这就是为什么先用假芯片练是划算的：骨架通了，换器件只剩查手册。
